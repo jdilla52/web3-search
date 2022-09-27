@@ -28,7 +28,40 @@ pub async fn binary_search_creation_block(web3: &Web3<Http>, address: Address) -
     runs
 }
 
-// #[test]
+
+pub async fn interpolation_search_creation_block(web3: &Web3<Http>, address: Address, estimation: f64) -> i32 {
+    let mut low = 1;
+    let mut high = get_latest_block(web3).await;
+    let mut runs = 0;
+
+    let original_count = ( high - low ) as f64;
+
+    while low < high {
+        // fraction for weighting the search from our estimation to a traditional binary search
+        let possibility_fraction = 1.0 - ((high - low) as f64 / original_count).powi(5);
+
+        // tradition binary guess - ie middle
+        let binary_value = (high + low) / 2;
+
+        // linear interpolation between binary search and estimation
+        let weighted_guess = (1.0-possibility_fraction) * binary_value as f64 + possibility_fraction * estimation;
+
+        let weighted_index = weighted_guess as u64;
+
+        let code = contract_contains_code(web3, address, Some(weighted_index)).await;
+        // println!("h {} - m {} - l {} - {}", high, binary_value, low, , code);
+        match code {
+            // contract is created, block is either `middle` or smaller than `middle`
+            true => high = weighted_index,
+            // contract doesn't exist, block can't be `middle` and must be larger
+            false => low = weighted_index + 1,
+        }
+        runs += 1;
+    }
+    println!("created at block {high}");
+    println!("found in {runs} RPC calls");
+    runs
+}
 
 async fn contract_contains_code(
     web3: &Web3<Http>,
@@ -65,4 +98,11 @@ async fn test_binary_search() {
     let web3 = build_web3();
     let address = Address::from_str("0x837b40be9ce60c79b63d1356a5f9fcad721421ec").unwrap();
     binary_search_creation_block(&web3, address).await;
+}
+
+#[tokio::test]
+async fn test_interpolation_search() {
+    let web3 = build_web3();
+    let address = Address::from_str("0x837b40be9ce60c79b63d1356a5f9fcad721421ec").unwrap();
+    interpolation_search_creation_block(&web3, address, 13308978.0).await;
 }
