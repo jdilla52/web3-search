@@ -6,9 +6,23 @@ use web3::Web3;
 
 static NO_CODE: Lazy<web3::types::Bytes> = Lazy::new(Bytes::default);
 
-pub async fn binary_search_creation_block(web3: &Web3<Http>, address: Address) -> i32 {
+pub async fn binary_search_creation_block(
+    web3: &Web3<Http>,
+    address: Address,
+    min: Option<u64>,
+    max: Option<u64>,
+) -> i32 {
     let mut low = 1;
+    if let Some(v) = min {
+        low = v
+    }
+
     let mut high = get_latest_block(web3).await;
+    if let Some(v) = max {
+        if v < high {
+            high = v;
+        }
+    };
     let mut runs = 0;
 
     while low < high {
@@ -31,46 +45,50 @@ pub async fn binary_search_creation_block(web3: &Web3<Http>, address: Address) -
 pub async fn interpolation_search_creation_block(
     web3: &Web3<Http>,
     address: Address,
-    estimation: u64,
-    bias: Option<f64>,
-    max: Option<u64>,
+    guess: u64,
+    bias: f64,
+    min: u64,
+    max: u64,
 ) -> i32 {
-    let mut low = 1;
+    let mut low = min;
+    let mut high = max;
 
-    let mut high = get_latest_block(web3).await;
-    if let Some(v) = max {
-        if v < high {
-            high = v;
-        }
-    };
+    // check we're not out of range
+    let latest = get_latest_block(web3).await;
+    if latest < high {
+        high = latest;
+    }
 
-    let mut inner_bias = 5.0;
-    if let Some(v) = bias {
-        inner_bias = v
-    };
+    let guess = guess as f64;
+    let range = (high - low) as f64;
 
     let mut runs = 0;
-
-    let original_count = (high - low) as f64;
-    let estimation = estimation as f64;
     while low < high {
         // fraction of current possibilities
-        let possibility_fraction = (high - low) as f64 / original_count;
-
+        let possibility_fraction = (high - low) as f64 / range;
         // raise the power of the fraction to bias more towards the guess or less
-        let raised_possibility_fraction = 1.0 - possibility_fraction.powf(inner_bias);
+        let raised_possibility_fraction = possibility_fraction.powf(bias);
 
         // tradition binary guess - ie middle
         let binary_value = (high + low) / 2;
 
         // linear interpolation between binary search and estimation
+        // this should move from the guess to binary search
         let weighted_guess = (1.0 - raised_possibility_fraction) * binary_value as f64
-            + raised_possibility_fraction * estimation;
+            + (raised_possibility_fraction) * guess;
 
         let weighted_index = weighted_guess as u64;
 
         let code = contract_contains_code(web3, address, Some(weighted_index)).await;
-        // println!("h {} - m {} - l {} - {}", high, binary_value, low, , code);
+        println!(
+            "h {} - bi {} - wi {} - l {} - pf {} - rpf {}",
+            high,
+            binary_value,
+            weighted_index,
+            low,
+            possibility_fraction,
+            raised_possibility_fraction
+        );
         match code {
             // contract is created, block is either `middle` or smaller than `middle`
             true => high = weighted_index,
@@ -105,12 +123,12 @@ pub async fn run_command(web3: &Web3<Http>, address: Address) {
     println!("is contract {is_contract}");
 
     if is_contract {
-        binary_search_creation_block(web3, address).await;
+        binary_search_creation_block(web3, address, None, None).await;
     }
 }
 
 fn build_web3() -> Web3<Http> {
-    let node = "https://eth-mainnet.g.alchemy.com/v2/nP_NafDRVjtS1WucTiZ5XEjvlP5T1Y9O";
+    let node = "https://eth-mainnet.g.alchemy.com/v2/NrrMfEnkJ9SUIkuDSUoITLM-niV_0tUb";
     let http = Http::new(node).expect("transport failure");
     Web3::new(http)
 }
@@ -118,13 +136,12 @@ fn build_web3() -> Web3<Http> {
 async fn test_binary_search() {
     let web3 = build_web3();
     let address = Address::from_str("0x837b40be9ce60c79b63d1356a5f9fcad721421ec").unwrap();
-    binary_search_creation_block(&web3, address).await;
+    binary_search_creation_block(&web3, address, Some(12908978), Some(13908978)).await;
 }
 
 #[tokio::test]
 async fn test_interpolation_search() {
     let web3 = build_web3();
     let address = Address::from_str("0x837b40be9ce60c79b63d1356a5f9fcad721421ec").unwrap();
-    interpolation_search_creation_block(&web3, address, 13308978, Some(5.0), Some(13308978 * 10))
-        .await;
+    interpolation_search_creation_block(&web3, address, 13308978, 0.1, 12908978, 13908978).await;
 }
