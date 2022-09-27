@@ -28,23 +28,44 @@ pub async fn binary_search_creation_block(web3: &Web3<Http>, address: Address) -
     runs
 }
 
-
-pub async fn interpolation_search_creation_block(web3: &Web3<Http>, address: Address, estimation: f64) -> i32 {
+pub async fn interpolation_search_creation_block(
+    web3: &Web3<Http>,
+    address: Address,
+    estimation: u64,
+    bias: Option<f64>,
+    max: Option<u64>,
+) -> i32 {
     let mut low = 1;
+
     let mut high = get_latest_block(web3).await;
+    if let Some(v) = max {
+        if v < high {
+            high = v;
+        }
+    };
+
+    let mut inner_bias = 5.0;
+    if let Some(v) = bias {
+        inner_bias = v
+    };
+
     let mut runs = 0;
 
-    let original_count = ( high - low ) as f64;
-
+    let original_count = (high - low) as f64;
+    let estimation = estimation as f64;
     while low < high {
-        // fraction for weighting the search from our estimation to a traditional binary search
-        let possibility_fraction = 1.0 - ((high - low) as f64 / original_count).powi(5);
+        // fraction of current possibilities
+        let possibility_fraction = (high - low) as f64 / original_count;
+
+        // raise the power of the fraction to bias more towards the guess or less
+        let raised_possibility_fraction = 1.0 - possibility_fraction.powf(inner_bias);
 
         // tradition binary guess - ie middle
         let binary_value = (high + low) / 2;
 
         // linear interpolation between binary search and estimation
-        let weighted_guess = (1.0-possibility_fraction) * binary_value as f64 + possibility_fraction * estimation;
+        let weighted_guess = (1.0 - raised_possibility_fraction) * binary_value as f64
+            + raised_possibility_fraction * estimation;
 
         let weighted_index = weighted_guess as u64;
 
@@ -104,5 +125,6 @@ async fn test_binary_search() {
 async fn test_interpolation_search() {
     let web3 = build_web3();
     let address = Address::from_str("0x837b40be9ce60c79b63d1356a5f9fcad721421ec").unwrap();
-    interpolation_search_creation_block(&web3, address, 13308978.0).await;
+    interpolation_search_creation_block(&web3, address, 13308978, Some(5.0), Some(13308978 * 10))
+        .await;
 }
